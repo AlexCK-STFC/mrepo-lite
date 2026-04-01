@@ -19,53 +19,51 @@ import configparser
 import getopt
 import glob
 import os
-from os.path import exists as path_exists
-from os.path import isdir as path_is_dir
-from os.path import join as path_join
-import socket
-
 import re
-import tempfile
-
-from hashlib import sha1 as sha1hash
-
-from operator import attrgetter
 import shutil
 import smtplib
 import sys
+import tempfile
 import time
-import urllib.request
 import urllib.parse
+import urllib.request
+from collections.abc import Callable, Generator, Iterable
+from hashlib import sha1 as sha1hash
+from operator import attrgetter
+from os.path import exists as path_exists
+from os.path import isdir as path_is_dir
+from os.path import join as path_join
+from typing import Any, TypeVar
 
 __version__ = "#version#"
 
 VERSION = __version__
 
 ARCHS = {
-    'alpha': ('alpha', 'alphaev5', 'alphaev56', 'alphaev6', 'alphaev67'),
-    'i386': ('i386', 'i486', 'i586', 'i686', 'athlon'),
-    'ia64': ('i386', 'i686', 'ia64'),
-    'ppc': ('ppc', ),
-    'ppc64': ('ppc', 'ppc64', 'ppc64pseries', 'ppc64iseries'),
-    'x86_64': ('i386', 'i486', 'i586', 'i686', 'athlon', 'x86_64', 'amd64', 'ia32e'),
-    'sparc64': ('sparc', 'sparcv8', 'sparcv9', 'sparc64'),
-    'sparc64v': ('sparc', 'sparcv8', 'sparcv9', 'sparcv9v', 'sparc64', 'sparc64v'),
-    's390': ('s390', ),
-    's390x': ('s390', 's390x'),
+    "alpha": ("alpha", "alphaev5", "alphaev56", "alphaev6", "alphaev67"),
+    "i386": ("i386", "i486", "i586", "i686", "athlon"),
+    "ia64": ("i386", "i686", "ia64"),
+    "ppc": ("ppc",),
+    "ppc64": ("ppc", "ppc64", "ppc64pseries", "ppc64iseries"),
+    "x86_64": ("i386", "i486", "i586", "i686", "athlon", "x86_64", "amd64", "ia32e"),
+    "sparc64": ("sparc", "sparcv8", "sparcv9", "sparc64"),
+    "sparc64v": ("sparc", "sparcv8", "sparcv9", "sparcv9v", "sparc64", "sparc64v"),
+    "s390": ("s390",),
+    "s390x": ("s390", "s390x"),
 }
 
 VARIABLES = {}
 
-DISABLE = ('no', 'off', 'false', '0')
+DISABLE = ("no", "off", "false", "0")
 
 EXITCODE = 0
 
-_SUBST_SUB = re.compile(r'\$\{?(\w+)\}?').sub
+_SUBST_SUB = re.compile(r"\$\{?(\w+)\}?").sub
 
 
-class Options(object):
+class Options:
     def __init__(self, args):
-        self.configfile = '/etc/mrepo.conf'
+        self.configfile = "/etc/mrepo.conf"
         self.dists = []
         self.force = False
         self.dryrun = False
@@ -78,89 +76,105 @@ class Options(object):
         self.create_aggregate_repos = False
 
         try:
-            opts, args = getopt.getopt(args, 'c:d:fghnqr:t:uvx', (
-                'config=',
-                'dist=',
-                'dry-run',
-                'force',
-                'generate',
-                'help',
-                'quiet',
-                'repo=',
-                'type=',
-                'update',
-                'verbose',
-                'version',
-                'extras',
-            ))
+            opts, args = getopt.getopt(
+                args,
+                "c:d:fghnqr:t:uvx",
+                (
+                    "config=",
+                    "dist=",
+                    "dry-run",
+                    "force",
+                    "generate",
+                    "help",
+                    "quiet",
+                    "repo=",
+                    "type=",
+                    "update",
+                    "verbose",
+                    "version",
+                    "extras",
+                ),
+            )
         except getopt.error as instance:
-            print('mrepo: %s, try mrepo -h for a list of all the options' % str(instance))
+            print(f"mrepo: {str(instance)}, try mrepo -h for a list of all the options")
             sys.exit(1)
 
         for opt, arg in opts:
-            if opt in ('-c', '--config'):
+            if opt in ("-c", "--config"):
                 self.configfile = os.path.abspath(arg)
-            elif opt in ('-d', '--dist'):
-                print('mrepo: the use of -d or --dist as an option is deprecated, use the argument list')
-                self.dists = self.dists + arg.split(',')
-            elif opt in ('-f', '--force'):
+            elif opt in ("-d", "--dist"):
+                print(
+                    "mrepo: the use of -d or --dist as an option is deprecated, use the argument list"
+                )
+                self.dists = self.dists + arg.split(",")
+            elif opt in ("-f", "--force"):
                 self.force = True
-            elif opt in ('-g', '--generate'):
+            elif opt in ("-g", "--generate"):
                 self.generate = True
-            elif opt in ('-h', '--help'):
+            elif opt in ("-h", "--help"):
                 self.usage()
                 print()
                 self.help()
                 sys.exit(0)
-            elif opt in ('-n', '--dry-run'):
+            elif opt in ("-n", "--dry-run"):
                 self.dryrun = True
-            elif opt in ('-q', '--quiet'):
+            elif opt in ("-q", "--quiet"):
                 self.quiet = True
-            elif opt in ('-r', '--repo'):
-                self.repos = self.repos + arg.split(',')
-            elif opt in ('-t', '--type'):
-                self.types = self.types + arg.split(',')
-            elif opt in ('-u', '--update'):
+            elif opt in ("-r", "--repo"):
+                self.repos = self.repos + arg.split(",")
+            elif opt in ("-t", "--type"):
+                self.types = self.types + arg.split(",")
+            elif opt in ("-u", "--update"):
                 self.update = True
-            elif opt in ('-v', '--verbose'):
+            elif opt in ("-v", "--verbose"):
                 self.verbose = self.verbose + 1
-            elif opt in ('--version', ):
+            elif opt in ("--version",):
                 self.version()
                 sys.exit(0)
-            elif opt in ('-x', '--extras'):
-                print('mrepo: the use of -x or --extras is deprecated, use -u and -r instead')
+            elif opt in ("-x", "--extras"):
+                print(
+                    "mrepo: the use of -x or --extras is deprecated, use -u and -r instead"
+                )
                 self.update = True
 
         if not self.types:
-            self.types = ['fish', 'ftp', 'http', 'https',
-                          'rsync', 'sftp', 'reposync', 'reposyncs',
-                          'reposyncf']
+            self.types = [
+                "fish",
+                "ftp",
+                "http",
+                "https",
+                "rsync",
+                "sftp",
+                "reposync",
+                "reposyncs",
+                "reposyncf",
+            ]
 
         for arg in args:
-            self.dists = self.dists + arg.split(',')
+            self.dists = self.dists + arg.split(",")
 
         if self.quiet:
             self.verbose = 0
 
         if self.verbose >= 3:
-            print('Verbosity set to level %d' % (self.verbose - 1))
-            print('Using configfile %s' % self.configfile)
+            print(f"Verbosity set to level {self.verbose - 1}")
+            print(f"Using configfile {self.configfile}")
 
     def version(self):
-        print('mrepo %s' % VERSION)
-        print('Written by Dag Wieers <dag@wieers.com>')
-        print('Homepage at http://dag.wieers.com/home-made/mrepo/')
+        print(f"mrepo {VERSION}")
+        print("Written by Dag Wieers <dag@wieers.com>")
+        print("Homepage at http://dag.wieers.com/home-made/mrepo/")
         print()
-        print('platform %s/%s' % (os.name, sys.platform))
-        print('python %s' % sys.version)
+        print(f"platform {os.name}/{sys.platform}")
+        print(f"python {sys.version}")
         print()
-        print('build revision $Rev$')
+        print("build revision $Rev$")
 
     def usage(self):
-        print('usage: mrepo [options] dist1 [dist2-arch ..]')
+        print("usage: mrepo [options] dist1 [dist2-arch ..]")
 
     def help(self):
-        print('''Set up a mirror server
+        print("""Set up a mirror server
 
 mrepo options:
   -c, --config=file       specify alternative configfile
@@ -174,70 +188,98 @@ mrepo options:
   -v, --verbose           increase verbosity
       --version           print mrepo version information
   -vv, -vvv, -vvvv..      increase verbosity more
-''')
+""")
 
 
-class Config(object):
+class Config:
     def __init__(self):
         self.read(OPTIONS.configfile)
 
-        self.cachedir = self.getoption('main', 'cachedir', '/var/cache/mrepo')
-        self.lockdir = self.getoption('main', 'lockdir', '/var/cache/mrepo')
-        self.confdir = self.getoption('main', 'confdir', '/etc/mrepo.conf.d')
-        self.srcdir = self.getoption('main', 'srcdir', '/var/mrepo')
-        self.wwwdir = self.getoption('main', 'wwwdir', '/var/www/mrepo')
-        self.logfile = self.getoption('main', 'logfile', '/var/log/mrepo.log')
+        self.cachedir = self.getoption("main", "cachedir", "/var/cache/mrepo")
+        self.lockdir = self.getoption("main", "lockdir", "/var/cache/mrepo")
+        self.confdir = self.getoption("main", "confdir", "/etc/mrepo.conf.d")
+        self.srcdir = self.getoption("main", "srcdir", "/var/mrepo")
+        self.wwwdir = self.getoption("main", "wwwdir", "/var/www/mrepo")
+        self.logfile = self.getoption("main", "logfile", "/var/log/mrepo.log")
 
-        self.mailto = self.getoption('main', 'mailto', None)
-        self.mailfrom = self.getoption('main', 'mailfrom', 'mrepo@%s' % os.uname()[1])
-        self.smtpserver = self.getoption('main', 'smtp-server', 'localhost')
+        self.mailto = self.getoption("main", "mailto", None)
+        self.mailfrom = self.getoption("main", "mailfrom", f"mrepo@{os.uname()[1]}")
+        self.smtpserver = self.getoption("main", "smtp-server", "localhost")
 
-        self.arch = self.getoption('main', 'arch', 'i386')
-        self.metadata = self.getoption('main', 'metadata', 'repomd')
+        self.arch = self.getoption("main", "arch", "i386")
+        self.metadata = self.getoption("main", "metadata", "repomd")
 
-        self.quiet = self.getoption('main', 'quiet', 'no') not in DISABLE
+        self.quiet = self.getoption("main", "quiet", "no") not in DISABLE
         if OPTIONS.verbose == 1 and self.quiet:
             OPTIONS.verbose = 0
 
-        self.no_proxy = self.getoption('main', 'no_proxy', None)
-        self.ftp_proxy = self.getoption('main', 'ftp_proxy', None)
-        self.http_proxy = self.getoption('main', 'http_proxy', None)
-        self.https_proxy = self.getoption('main', 'https_proxy', None)
-        self.rsync_proxy = self.getoption('main', 'RSYNC_PROXY', None)
+        self.no_proxy = self.getoption("main", "no_proxy", None)
+        self.ftp_proxy = self.getoption("main", "ftp_proxy", None)
+        self.http_proxy = self.getoption("main", "http_proxy", None)
+        self.https_proxy = self.getoption("main", "https_proxy", None)
+        self.rsync_proxy = self.getoption("main", "RSYNC_PROXY", None)
 
         self.cmd = {}
-        self.cmd['createrepo'] = self.getoption('main', 'createrepocmd', '/usr/bin/createrepo')
-        self.cmd['lftp'] = self.getoption('main', 'lftpcmd', '/usr/bin/lftp')
-        self.cmd['reposync'] = self.getoption('main', 'reposynccmd', '/usr/bin/reposync')
-        self.cmd['rsync'] = self.getoption('main', 'rsynccmd', '/usr/bin/rsync')
+        self.cmd["createrepo"] = self.getoption(
+            "main", "createrepocmd", "/usr/bin/createrepo"
+        )
+        self.cmd["lftp"] = self.getoption("main", "lftpcmd", "/usr/bin/lftp")
+        self.cmd["reposync"] = self.getoption(
+            "main", "reposynccmd", "/usr/bin/reposync"
+        )
+        self.cmd["rsync"] = self.getoption("main", "rsynccmd", "/usr/bin/rsync")
 
-        self.createrepooptions = self.getoption('main', 'createrepo-options', '--pretty --database --update')
+        self.createrepooptions = self.getoption(
+            "main", "createrepo-options", "--pretty --database --update"
+        )
 
-        self.lftpbwlimit = self.getoption('main', 'lftp-bandwidth-limit', None)
-        self.lftpcleanup = self.getoption('main', 'lftp-cleanup', 'yes') not in DISABLE
-        self.lftpexcldebug = self.getoption('main', 'lftp-exclude-debug', 'yes') not in DISABLE
-        self.lftpexclsrpm = self.getoption('main', 'lftp-exclude-srpm', 'yes') not in DISABLE
-        self.lftpoptions = self.getoption('main', 'lftp-options', '')
-        self.lftpcommands = self.getoption('main', 'lftp-commands', '')
-        self.lftpmirroroptions = self.getoption('main', 'lftp-mirror-options', '-c')
-        self.lftptimeout = self.getoption('main', 'lftp-timeout', None)
+        self.lftpbwlimit = self.getoption("main", "lftp-bandwidth-limit", None)
+        self.lftpcleanup = self.getoption("main", "lftp-cleanup", "yes") not in DISABLE
+        self.lftpexcldebug = (
+            self.getoption("main", "lftp-exclude-debug", "yes") not in DISABLE
+        )
+        self.lftpexclsrpm = (
+            self.getoption("main", "lftp-exclude-srpm", "yes") not in DISABLE
+        )
+        self.lftpoptions = self.getoption("main", "lftp-options", "")
+        self.lftpcommands = self.getoption("main", "lftp-commands", "")
+        self.lftpmirroroptions = self.getoption("main", "lftp-mirror-options", "-c")
+        self.lftptimeout = self.getoption("main", "lftp-timeout", None)
 
-        self.reposyncoptions = self.getoption('main', 'reposync-options', '')
-        self.reposynccleanup = self.getoption('main', 'reposync-cleanup', 'yes') not in DISABLE
-        self.reposyncnewestonly = self.getoption('main', 'reposync-newest-only', 'no') not in DISABLE
-        self.reposyncexcldebug = self.getoption('main', 'reposync-exclude-debug', 'yes') not in DISABLE
-        self.reposyncnorepopath = self.getoption('main', 'reposync-no-repopath', 'yes') not in DISABLE
-        self.reposynctimeout = self.getoption('main', 'reposync-timeout', '90')
-        self.reposyncminrate = self.getoption('main', 'reposync-minrate', '250')
+        self.reposyncoptions = self.getoption("main", "reposync-options", "")
+        self.reposynccleanup = (
+            self.getoption("main", "reposync-cleanup", "yes") not in DISABLE
+        )
+        self.reposyncnewestonly = (
+            self.getoption("main", "reposync-newest-only", "no") not in DISABLE
+        )
+        self.reposyncexcldebug = (
+            self.getoption("main", "reposync-exclude-debug", "yes") not in DISABLE
+        )
+        self.reposyncnorepopath = (
+            self.getoption("main", "reposync-no-repopath", "yes") not in DISABLE
+        )
+        self.reposynctimeout = self.getoption("main", "reposync-timeout", "90")
+        self.reposyncminrate = self.getoption("main", "reposync-minrate", "250")
 
-        self.rsyncbwlimit = self.getoption('main', 'rsync-bandwidth-limit', None)
-        self.rsynccleanup = self.getoption('main', 'rsync-cleanup', 'yes') not in DISABLE
-        self.rsyncexclheaders = self.getoption('main', 'rsync-exclude-headers', 'yes') not in DISABLE
-        self.rsyncexclrepodata = self.getoption('main', 'rsync-exclude-repodata', 'yes') not in DISABLE
-        self.rsyncexcldebug = self.getoption('main', 'rsync-exclude-debug', 'yes') not in DISABLE
-        self.rsyncexclsrpm = self.getoption('main', 'rsync-exclude-srpm', 'yes') not in DISABLE
-        self.rsyncoptions = self.getoption('main', 'rsync-options', '-rtHL --partial')
-        self.rsynctimeout = self.getoption('main', 'rsync-timeout', None)
+        self.rsyncbwlimit = self.getoption("main", "rsync-bandwidth-limit", None)
+        self.rsynccleanup = (
+            self.getoption("main", "rsync-cleanup", "yes") not in DISABLE
+        )
+        self.rsyncexclheaders = (
+            self.getoption("main", "rsync-exclude-headers", "yes") not in DISABLE
+        )
+        self.rsyncexclrepodata = (
+            self.getoption("main", "rsync-exclude-repodata", "yes") not in DISABLE
+        )
+        self.rsyncexcldebug = (
+            self.getoption("main", "rsync-exclude-debug", "yes") not in DISABLE
+        )
+        self.rsyncexclsrpm = (
+            self.getoption("main", "rsync-exclude-srpm", "yes") not in DISABLE
+        )
+        self.rsyncoptions = self.getoption("main", "rsync-options", "-rtHL --partial")
+        self.rsynctimeout = self.getoption("main", "rsync-timeout", None)
 
         self.alldists = []
         self.dists = []
@@ -247,41 +289,41 @@ class Config(object):
     def read(self, configfile):
         self.cfg = configparser.ConfigParser()
 
-        info(4, 'Reading config file %s' % (configfile))
+        info(4, f"Reading config file {configfile}")
 
-        if urllib.parse.urlsplit(configfile).scheme in ('http', 'ftp', 'file'):
+        if urllib.parse.urlsplit(configfile).scheme in ("http", "ftp", "file"):
             configfh = urllib.request.urlopen(configfile)
             try:
                 self.cfg.read_file(configfh)
-            except IOError:
-                die(6, 'Error accessing URL: %s' % configfile)
+            except OSError:
+                die(6, f"Error accessing URL: {configfile}")
         else:
             if os.access(configfile, os.R_OK):
                 try:
                     self.cfg.read(configfile)
                 except configparser.MissingSectionHeaderError:
-                    die(7, 'Syntax error reading file: %s' % configfile)
+                    die(7, f"Syntax error reading file: {configfile}")
             else:
-                die(6, 'Error accessing file: %s' % configfile)
+                die(6, f"Error accessing file: {configfile}")
 
     def update(self):
-        for section in ('variables', 'vars', 'DEFAULT'):
+        for section in ("variables", "vars", "DEFAULT"):
             if section in self.cfg.sections():
                 for option in self.cfg.options(section):
                     VARIABLES[option] = self.cfg.get(section, option)
 
         for section in self.cfg.sections():
-            if section in ('main', 'repos', 'variables', 'vars', 'DEFAULT'):
+            if section in ("main", "repos", "variables", "vars", "DEFAULT"):
                 continue
             else:
                 ### Check if section has appended arch
                 for arch in ARCHS:
-                    if section.endswith('-%s' % arch):
+                    if section.endswith(f"-{arch}"):
                         archlist = (arch,)
-                        distname = section.split('-%s' % arch)[0]
+                        distname = section.split(f"-{arch}")[0]
                         break
                 else:
-                    archlist = self.getoption(section, 'arch', self.arch).split()
+                    archlist = self.getoption(section, "arch", self.arch).split()
                     distname = section
 
                 ### Add a distribution for each arch
@@ -293,28 +335,32 @@ class Config(object):
                     dist.promoteepoch = True
                     dist.systemid = None
                     for option in self.cfg.options(section):
-                        if option in ('name', 'release', 'repo'):
+                        if option in ("name", "release", "repo"):
                             setattr(dist, option, self.cfg.get(section, option))
-                        elif option in ('arch', 'dist'):
+                        elif option in ("arch", "dist"):
                             pass
-                        elif option in ('disabled',):
+                        elif option in ("disabled",):
                             dist.enabled = self.cfg.get(section, option) in DISABLE
-                        elif option in ('metadata',):
+                        elif option in ("metadata",):
                             setattr(dist, option, self.cfg.get(section, option).split())
-                        elif option in ('promoteepoch',):
-                            dist.promoteepoch = self.cfg.get(section, option) not in DISABLE
-                        elif option in ('systemid',):
+                        elif option in ("promoteepoch",):
+                            dist.promoteepoch = (
+                                self.cfg.get(section, option) not in DISABLE
+                            )
+                        elif option in ("systemid",):
                             dist.systemid = self.cfg.get(section, option)
-                        elif option in ('sslcert',):
+                        elif option in ("sslcert",):
                             dist.sslcert = self.cfg.get(section, option)
-                        elif option in ('sslkey',):
+                        elif option in ("sslkey",):
                             dist.sslkey = self.cfg.get(section, option)
-                        elif option in ('sslca',):
+                        elif option in ("sslca",):
                             dist.sslca = self.cfg.get(section, option)
                         else:
-                            dist.repos.append(Repo(option, self.cfg.get(section, option), dist, self))
+                            dist.repos.append(
+                                Repo(option, self.cfg.get(section, option), dist, self)
+                            )
 
-                    dist.repos.sort(key=attrgetter('name'))
+                    dist.repos.sort(key=attrgetter("name"))
                     dist.rewrite()
 
                     self.alldists.append(dist)
@@ -322,58 +368,66 @@ class Config(object):
                     if dist.enabled:
                         self.dists.append(dist)
                     else:
-                        info(5, '%s: %s is disabled' % (dist.nick, dist.name))
+                        info(5, f"{dist.nick}: {dist.name} is disabled")
 
-        self.alldists.sort(key=attrgetter('nick'))
-        self.dists.sort(key=attrgetter('nick'))
+        self.alldists.sort(key=attrgetter("nick"))
+        self.dists.sort(key=attrgetter("nick"))
 
     def getoption(self, section, option, var):
         "Get an option from a section from configfile"
         try:
             var = self.cfg.get(section, option)
-            info(3, 'Setting option %s in section [%s] to: %s' % (option, section, var))
+            info(3, f"Setting option {option} in section [{section}] to: {var}")
         except configparser.NoSectionError:
-            error(5, 'Failed to find section [%s]' % section)
+            error(5, f"Failed to find section [{section}]")
         except configparser.NoOptionError:
-            info(5, 'Setting option %s in section [%s] to: %s (default)' % (option, section, var))
+            info(
+                5,
+                f"Setting option {option} in section [{section}] to: {var} (default)",
+            )
         return var
 
 
-class Dist(object):
-    def __init__(self, dist, arch, config):
-        self.arch = arch
-        self.dist = dist
-        self.enabled = False
-        self.nick = dist + '-' + arch
-        if arch == 'none':
-            self.nick = dist
-        self.name = dist
-        self.metadata = []
-        self.dir = path_join(config.wwwdir, self.nick)
-        self.promoteepoch = None
-        self.release = None
-        self.repos = []
-        self.srcdir = config.srcdir
-        self.systemid = None
-        self.sslcert = None
-        self.sslkey = None
-        self.sslca = None
+class Dist:
+    def __init__(self, dist: str, arch: str, config):
+        self.arch: str = arch
+        self.dist: str = dist
+        self.enabled: bool = False
 
+        self.nick: str = dist + "-" + arch if arch != "none" else dist
+        self.name: str = dist
+
+        self.metadata: list[str] = []
+        self.dir: str = path_join(config.wwwdir, self.nick)
+
+        self.promoteepoch: bool | None = None
+        self.release: str | None = None
+        self.repos: list[Repo] = []
+
+        self.srcdir: str = config.srcdir
+
+        # These can become strings -> use Optional[str]
+        self.systemid: str | None = None
+        self.sslcert: str | None = None
+        self.sslkey: str | None = None
+        self.sslca: str | None = None
 
     def rewrite(self):
         "Rewrite (string) attributes to replace variables by other (string) attributes"
         varlist = VARIABLES
-        varlist.update({
-            'arch': self.arch,
-            'nick': self.nick,
-            'dist': self.dist,
-            'release': self.release,
-        })
+        varlist.update(
+            {
+                "arch": self.arch,
+                "nick": self.nick,
+                "dist": self.dist,
+                "release": self.release,
+            }
+        )
         for key, value in vars(self).items():
             if isinstance(value, str):
                 setattr(self, key, substitute(value, varlist))
         for repo in self.repos:
-            varlist['repo'] = repo.name
+            varlist["repo"] = repo.name
             repo.url = substitute(repo.url, varlist)
 
     def listrepos(self, names=None):
@@ -383,7 +437,7 @@ class Dist(object):
 
     def genmetadata(self):
         for repo in self.listrepos(OPTIONS.repos):
-            if not repo.lock('generate'):
+            if not repo.lock("generate"):
                 continue
 
             self.linksync(repo, [repo.srcdir])
@@ -393,7 +447,7 @@ class Dist(object):
 
             ### After generation, write a sha1sum
             repo.writesha1()
-            repo.unlock('generate')
+            repo.unlock("generate")
 
     def linksync(self, repo, srcdirs=None):
         if not srcdirs:
@@ -403,10 +457,14 @@ class Dist(object):
         # srcfiles = [ (basename, relpath), ... ]
         srcfiles.sort()
         # uniq basenames
-        srcfiles = [f for i, f in enumerate(srcfiles)
-                    if not i or f[0] != srcfiles[i - 1][0]]
+        srcfiles = [
+            f for i, f in enumerate(srcfiles) if not i or f[0] != srcfiles[i - 1][0]
+        ]
 
-        info(5, '%s: Symlink %s packages from %s to %s' % (repo.dist.nick, repo.name, srcdirs, destdir))
+        info(
+            5,
+            f"{repo.dist.nick}: Symlink {repo.name} packages from {srcdirs} to {destdir}",
+        )
         mkdir(destdir)
 
         destfiles = listrpmlinks(destdir)
@@ -420,19 +478,21 @@ class Dist(object):
         changed = False
         for srcfile, destfile in synciter(srcfiles, destfiles, key=keyfunc):
             if srcfile is None:
+                assert destfile is not None
                 # delete the link
                 base, _ = destfile
                 linkname = path_join(destdir, base)
-                info(5, 'Remove link: %s' % (linkname,))
+                info(5, f"Remove link: {linkname}")
                 if not OPTIONS.dryrun:
                     os.unlink(linkname)
                     changed = True
             elif destfile is None:
+                assert srcfile is not None
                 base, srcdir = srcfile
                 # create a new link
                 linkname = path_join(destdir, base)
                 target = path_join(srcdir, base)
-                info(5, 'New link: %s -> %s' % (linkname, target))
+                info(5, f"New link: {linkname} -> {target}")
                 if not OPTIONS.dryrun:
                     os.symlink(target, linkname)
                     changed = True
@@ -442,7 +502,10 @@ class Dist(object):
                 _, curtarget = destfile
                 target = path_join(srcdir, base)
                 if target != curtarget:
-                    info(5, 'Changed link %s: current: %s, should be: %s' % (base, curtarget, target))
+                    info(
+                        5,
+                        f"Changed link {base}: current: {curtarget}, should be: {target}",
+                    )
                     linkname = path_join(destdir, base)
                     if not OPTIONS.dryrun:
                         os.unlink(linkname)
@@ -453,13 +516,13 @@ class Dist(object):
             repo.changed = True
 
 
-class Repo(object):
+class Repo:
     def __init__(self, name, url, dist, config):
         self.name = name
         self.url = url
         self.dist = dist
         self.srcdir = path_join(config.srcdir, dist.nick, self.name)
-        self.wwwdir = path_join(dist.dir, 'RPMS.' + self.name)
+        self.wwwdir = path_join(dist.dir, "RPMS." + self.name)
 
         self.changed = False
 
@@ -471,7 +534,7 @@ class Repo(object):
 
     def mirror(self):
         "Check URL and pass on to mirror-functions."
-        global EXITCODE # pylint: disable=global-statement
+        global EXITCODE  # pylint: disable=global-statement
 
         ### Make a snapshot of the directory
         self.oldlist = self.rpmlist()
@@ -479,21 +542,32 @@ class Repo(object):
 
         for url in self.url.split():
             try:
-                info(2, '%s: Mirror packages from %s to %s' % (self.dist.nick, url, self.srcdir))
+                info(
+                    2,
+                    f"{self.dist.nick}: Mirror packages from {url} to {self.srcdir}",
+                )
                 scheme = urllib.parse.urlsplit(url).scheme
                 if scheme not in OPTIONS.types:
-                    info(4, 'Ignoring mirror action for type %s' % scheme)
+                    info(4, f"Ignoring mirror action for type {scheme}")
                     continue
-                if scheme in ('rsync', ):
+                if scheme in ("rsync",):
                     mirrorrsync(url, self.srcdir)
-                elif scheme in ('ftp', 'fish', 'http', 'https', 'sftp'):
+                elif scheme in ("ftp", "fish", "http", "https", "sftp"):
                     mirrorlftp(url, self.srcdir, self.dist)
-                elif scheme in ('reposync', 'reposyncs', 'reposyncf'):
-                    mirrorreposync(url, self.srcdir, '%s-%s' % (self.dist.nick, self.name), self.dist)
+                elif scheme in ("reposync", "reposyncs", "reposyncf"):
+                    mirrorreposync(
+                        url,
+                        self.srcdir,
+                        f"{self.dist.nick}-{self.name}",
+                        self.dist,
+                    )
                 else:
-                    error(2, 'Scheme %s:// not implemented yet (in %s)' % (scheme, url))
+                    error(2, f"Scheme {scheme}:// not implemented yet (in {url})")
             except MrepoMirrorException as instance:
-                error(0, 'Mirroring failed for %s with message:\n  %s' % (url, instance.value))
+                error(
+                    0,
+                    f"Mirroring failed for {url} with message:\n  {instance.value}",
+                )
                 EXITCODE = 2
         if not self.url:
             ### Create directory in case no URL is given
@@ -506,7 +580,7 @@ class Repo(object):
         "Capture a list of packages in the repository"
         filelist = set()
 
-        for filename in glob.glob(path_join(self.srcdir, '**/*.rpm'), recursive=True):
+        for filename in glob.glob(path_join(self.srcdir, "**/*.rpm"), recursive=True):
             size = os.stat(filename).st_size
             filelist.add((filename, size))
 
@@ -516,95 +590,108 @@ class Repo(object):
         "Return what repositories require an update and write .newsha1sum"
         if not path_is_dir(self.wwwdir):
             return
-        sha1file = path_join(self.wwwdir, '.sha1sum')
-        remove(sha1file + '.tmp')
+        sha1file = path_join(self.wwwdir, ".sha1sum")
+        remove(sha1file + ".tmp")
         cursha1 = sha1dir(self.wwwdir)
         if OPTIONS.force:
             pass
         elif os.path.isfile(sha1file):
             oldsha1 = readfile(sha1file)
             if cursha1 != oldsha1:
-                info(2, '%s: Repository %s has new packages.' % (self.dist.nick, self.name))
+                info(
+                    2,
+                    f"{self.dist.nick}: Repository {self.name} has new packages.",
+                )
             else:
-                info(5, '%s: Repository %s has not changed. Skipping.' % (self.dist.nick, self.name))
+                info(
+                    5,
+                    f"{self.dist.nick}: Repository {self.name} has not changed. Skipping.",
+                )
                 return
         else:
-            info(5, '%s: New repository %s detected.' % (self.dist.nick, self.name))
-        writesha1(sha1file + '.tmp', cursha1)
+            info(5, f"{self.dist.nick}: New repository {self.name} detected.")
+        writesha1(sha1file + ".tmp", cursha1)
         self.changed = True
 
     def writesha1(self):
         "Verify .newsha1sum and write a .sha1sum file per repository"
-        sha1file = path_join(self.wwwdir, '.sha1sum')
-        if os.path.isfile(sha1file + '.tmp'):
+        sha1file = path_join(self.wwwdir, ".sha1sum")
+        if os.path.isfile(sha1file + ".tmp"):
             cursha1 = sha1dir(self.wwwdir)
-            tmpsha1 = readfile(sha1file + '.tmp')
-            remove(sha1file + '.tmp')
+            tmpsha1 = readfile(sha1file + ".tmp")
+            remove(sha1file + ".tmp")
             if cursha1 == tmpsha1:
                 writesha1(sha1file, cursha1)
             else:
-                info(5, '%s: Checksum is different. expect: %s, got: %s' % (
-                    self.dist.nick,
-                    cursha1,
-                    tmpsha1,
-                ))
-                info(1, '%s: Directory changed during generating %s repo, please generate again.' % (
-                    self.dist.nick,
-                    self.name,
-                ))
+                info(
+                    5,
+                    f"{self.dist.nick}: Checksum is different. expect: {cursha1}, got: {tmpsha1}",
+                )
+                info(
+                    1,
+                    f"{self.dist.nick}: Directory changed during generating {self.name} repo, please generate again.",
+                )
 
     def lock(self, action):
         if OPTIONS.dryrun:
             return True
-        lockfile = path_join(CONFIG.lockdir, self.dist.nick, action + '-' + self.name + '.lock') # pylint: disable=possibly-used-before-assignment
+        lockfile = path_join(
+            CONFIG.lockdir, self.dist.nick, action + "-" + self.name + ".lock"
+        )  # pylint: disable=possibly-used-before-assignment
         mkdir(os.path.dirname(lockfile))
         try:
-            file_descriptor = os.open(lockfile, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o0600)
-            info(6, '%s: Setting lock %s' % (self.dist.nick, lockfile))
-            os.write(file_descriptor, b'%d' % os.getpid())
+            file_descriptor = os.open(
+                lockfile, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o0600
+            )
+            info(6, f"{self.dist.nick}: Setting lock {lockfile}")
+            os.write(file_descriptor, b"%d" % os.getpid())
             os.close(file_descriptor)
             return True
         except OSError:
             if path_exists(lockfile):
                 pid = readfile(lockfile)
-                if path_exists('/proc/%s' % pid):
-                    error(0, '%s: Found existing lock %s owned by pid %s' % (self.dist.nick, lockfile, pid))
+                if path_exists(f"/proc/{pid}"):
+                    error(
+                        0,
+                        f"{self.dist.nick}: Found existing lock {lockfile} owned by pid {pid}",
+                    )
                 else:
-                    info(6, '%s: Removing stale lock %s' % (self.dist.nick, lockfile))
+                    info(6, f"{self.dist.nick}: Removing stale lock {lockfile}")
                     os.unlink(lockfile)
                     self.lock(action)
                     return True
             else:
-                error(0, '%s: Lockfile %s does not exist. Cannot lock. Parallel universe ?' % (
-                    self.dist.nick,
-                    lockfile,
-                ))
+                error(
+                    0,
+                    f"{self.dist.nick}: Lockfile {lockfile} does not exist. Cannot lock. Parallel universe ?",
+                )
         return False
 
     def unlock(self, action):
         if OPTIONS.dryrun:
             return
-        lockfile = path_join(CONFIG.lockdir, self.dist.nick, action + '-' + self.name + '.lock')
-        info(6, '%s: Removing lock %s' % (self.dist.nick, lockfile))
+        lockfile = path_join(
+            CONFIG.lockdir, self.dist.nick, action + "-" + self.name + ".lock"
+        )
+        info(6, f"{self.dist.nick}: Removing lock {lockfile}")
         if path_exists(lockfile):
             pid = readfile(lockfile)
-            if pid == '%s' % os.getpid():
+            if pid == f"{os.getpid()}":
                 os.unlink(lockfile)
             else:
-                error(0, '%s: Existing lock %s found owned by another process with pid %s. This should NOT happen.' % (
-                    self.dist.nick,
-                    lockfile,
-                    pid,
-                ))
+                error(
+                    0,
+                    f"{self.dist.nick}: Existing lock {lockfile} found owned by another process with pid {pid}. This should NOT happen.",
+                )
         else:
-            error(0, '%s: Lockfile %s does not exist. Cannot unlock. Something fishy here ?' % (
-                self.dist.nick,
-                lockfile,
-            ))
+            error(
+                0,
+                f"{self.dist.nick}: Lockfile {lockfile} does not exist. Cannot unlock. Something fishy here ?",
+            )
 
     def createmd(self):
-        global EXITCODE # pylint: disable=global-statement
-        metadata = ('createrepo', 'repomd')
+        global EXITCODE  # pylint: disable=global-statement
+        metadata = ("createrepo", "repomd")
 
         if not self.changed and not OPTIONS.force:
             return
@@ -612,43 +699,54 @@ class Repo(object):
         try:
             ### Generate repository metadata
             for metadata in self.dist.metadata:
-                if metadata in ('createrepo', 'repomd'):
+                if metadata in ("createrepo", "repomd"):
                     self.repomd()
 
         except MrepoGenerateException as instance:
-            error(0, 'Generating repo failed for %s with message:\n  %s' % (self.name, instance.value))
+            error(
+                0,
+                f"Generating repo failed for {self.name} with message:\n  {instance.value}",
+            )
             EXITCODE = 2
 
     def repomd(self):
         "Create a repomd repository"
-        if not CONFIG.cmd['createrepo']:
-            raise MrepoGenerateException('Command createrepo is not found. Skipping.')
+        if not CONFIG.cmd["createrepo"]:
+            raise MrepoGenerateException("Command createrepo is not found. Skipping.")
 
-        opts = ' ' + CONFIG.createrepooptions
+        opts = " " + CONFIG.createrepooptions
         if OPTIONS.force:
-            opts = ' --pretty' + opts
+            opts = " --pretty" + opts
         if OPTIONS.verbose <= 2:
-            opts = ' --quiet' + opts
+            opts = " --quiet" + opts
         elif OPTIONS.verbose >= 4:
-            opts = ' -v' + opts
+            opts = " -v" + opts
         if not self.dist.promoteepoch:
-            opts = opts + ' -n'
+            opts = opts + " -n"
         if path_is_dir(self.wwwdir):
             repoopts = opts
             if CONFIG.cachedir:
                 cachedir = path_join(CONFIG.cachedir, self.dist.nick, self.name)
                 mkdir(cachedir)
-                repoopts = repoopts + ' --cachedir "%s"' % cachedir
-            if path_is_dir(path_join(self.wwwdir, '.olddata')):
-                remove(path_join(self.wwwdir, '.olddata'))
-            groupfile = path_join(CONFIG.srcdir, self.dist.nick, self.name + '-comps.xml')
+                repoopts = repoopts + f' --cachedir "{cachedir}"'
+            if path_is_dir(path_join(self.wwwdir, ".olddata")):
+                remove(path_join(self.wwwdir, ".olddata"))
+            groupfile = path_join(
+                CONFIG.srcdir, self.dist.nick, self.name + "-comps.xml"
+            )
             if os.path.isfile(groupfile):
-                symlink(groupfile, path_join(self.wwwdir, 'comps.xml'))
-                repoopts = repoopts + ' --groupfile "%s"' % groupfile
-            info(2, '%s: Create repomd repository for %s' % (self.dist.nick, self.name))
-            ret = run('%s %s %s' % (CONFIG.cmd['createrepo'], repoopts, self.wwwdir))
+                symlink(groupfile, path_join(self.wwwdir, "comps.xml"))
+                repoopts = repoopts + f' --groupfile "{groupfile}"'
+            info(2, f"{self.dist.nick}: Create repomd repository for {self.name}")
+            ret = run(
+                "{} {} {}".format(CONFIG.cmd["createrepo"], repoopts, self.wwwdir)
+            )
             if ret:
-                raise MrepoGenerateException('%s failed with return code: %s' % (CONFIG.cmd['createrepo'], ret))
+                raise MrepoGenerateException(
+                    "{} failed with return code: {}".format(
+                        CONFIG.cmd["createrepo"], ret
+                    )
+                )
 
 
 class MrepoMirrorException(Exception):
@@ -671,12 +769,18 @@ class MrepoGenerateException(Exception):
 
 def sha1dir(directory):
     "Return sha1sum of a directory"
-    files = glob.glob(directory + '/*.rpm')
+    files = glob.glob(directory + "/*.rpm")
     files.sort()
-    output = ''
+    output = ""
     for filename in files:
-        output = output + os.path.basename(filename) + ' ' + str(os.stat(filename).st_size) + '\n'
-    return sha1hash(output.encode('utf-8')).hexdigest()
+        output = (
+            output
+            + os.path.basename(filename)
+            + " "
+            + str(os.stat(filename).st_size)
+            + "\n"
+        )
+    return sha1hash(output.encode("utf-8")).hexdigest()
 
 
 def writesha1(filename, sha1sum=None):
@@ -690,14 +794,14 @@ def writesha1(filename, sha1sum=None):
 def error(level, text):
     "Output error message"
     if level <= OPTIONS.verbose:
-        sys.stderr.write('mrepo: %s\n' % text)
+        sys.stderr.write(f"mrepo: {text}\n")
         sys.stderr.flush()
 
 
 def info(level, text):
     "Output info message"
     if level <= OPTIONS.verbose:
-        sys.stdout.write('%s\n' % text)
+        sys.stdout.write(f"{text}\n")
         sys.stderr.flush()
 
 
@@ -709,13 +813,13 @@ def die(ret, text):
 
 def run(text, dryrun=False):
     "Run command, accept user input, and print output when needed."
-    text = 'exec ' + text
+    text = "exec " + text
     if OPTIONS.verbose <= 2:
-        text = text + ' >/dev/null'
+        text = text + " >/dev/null"
     if not OPTIONS.dryrun or dryrun:
-        info(5, 'Execute: %s' % text)
+        info(5, f"Execute: {text}")
         return os.system(text)
-    info(1, 'Not execute: %s' % text)
+    info(1, f"Not execute: {text}")
     return 0
 
 
@@ -724,14 +828,14 @@ def readfile(filename, size=0):
     if not os.path.isfile(filename):
         return None
     if size:
-        return open(filename, 'r', encoding='utf-8').read(size)
-    return open(filename, 'r', encoding='utf-8').read()
+        return open(filename, encoding="utf-8").read(size)
+    return open(filename, encoding="utf-8").read()
 
 
 def writefile(filename, text):
     if OPTIONS.dryrun:
         return
-    with open(filename, 'w', encoding='utf-8') as file_object:
+    with open(filename, "w", encoding="utf-8") as file_object:
         file_object.write(text)
 
 
@@ -765,16 +869,16 @@ def abspath(path, reference):
 
 def relpath(path, reference):
     """Make relative path from reference
-       if reference is a directory, it must end with a /"""
+    if reference is a directory, it must end with a /"""
     common = os.path.commonprefix([path, reference])
-    common = common[0:common.rfind('/') + 1]
-    (uncommon, _) = os.path.split(reference.replace(common, '', 1))
+    common = common[0 : common.rfind("/") + 1]
+    (uncommon, _) = os.path.split(reference.replace(common, "", 1))
     if uncommon:
         newpath = []
-        for _ in uncommon.split('/'):
-            newpath.append('..')
-        newpath.append(path.replace(common, '', 1))
-        return '/'.join(newpath)
+        for _ in uncommon.split("/"):
+            newpath.append("..")
+        newpath.append(path.replace(common, "", 1))
+        return "/".join(newpath)
     return path
 
 
@@ -797,7 +901,7 @@ def symlink(src, dst):
     elif os.path.isfile(dst):
         if os.path.samefile(src, dst):
             return
-        os.rename(dst, dst + '.mrepobak')
+        os.rename(dst, dst + ".mrepobak")
 
     src = relpath(src, dst)
 
@@ -853,183 +957,192 @@ def mkdir(path):
 
 def mirrorrsync(url, path):
     "Mirror everything from an rsync:// URL"
-    if not CONFIG.cmd['rsync']:
-        error(1, 'rsync was not found. rsync support is therefore disabled.')
+    if not CONFIG.cmd["rsync"]:
+        error(1, "rsync was not found. rsync support is therefore disabled.")
         return
 
     # Ensure both source and destination paths end with a trailing slash
-    url = url.rstrip('/') + '/'
-    path = path_join(path, '')
+    url = url.rstrip("/") + "/"
+    path = path_join(path, "")
 
     mkdir(path)
 
     opts = CONFIG.rsyncoptions
     if OPTIONS.verbose <= 2:
-        opts = opts + ' -q'
+        opts = opts + " -q"
     elif OPTIONS.verbose == 3:
-        opts = opts + ' -v'
+        opts = opts + " -v"
     elif OPTIONS.verbose == 4:
-        opts = opts + ' -v --progress'
+        opts = opts + " -v --progress"
     elif OPTIONS.verbose == 5:
-        opts = opts + ' -vv --progress'
+        opts = opts + " -vv --progress"
     elif OPTIONS.verbose >= 6:
-        opts = opts + ' -vvv --progress'
+        opts = opts + " -vvv --progress"
     if OPTIONS.dryrun:
-        opts = opts + ' --dry-run'
+        opts = opts + " --dry-run"
     if CONFIG.rsynctimeout:
-        opts = opts + ' --timeout=%s' % CONFIG.rsynctimeout
+        opts = opts + f" --timeout={CONFIG.rsynctimeout}"
     if CONFIG.rsynccleanup:
-        opts = opts + ' --delete-after --delete-excluded'
+        opts = opts + " --delete-after --delete-excluded"
     if CONFIG.rsyncbwlimit:
-        opts = opts + ' --bwlimit=%s' % CONFIG.rsyncbwlimit
+        opts = opts + f" --bwlimit={CONFIG.rsyncbwlimit}"
     if CONFIG.rsyncexclheaders:
-        opts = opts + ' --exclude=\"/headers/\"'
+        opts = opts + ' --exclude="/headers/"'
     if CONFIG.rsyncexclrepodata:
-        opts = opts + ' --exclude=\"/repodata/\"'
+        opts = opts + ' --exclude="/repodata/"'
     if CONFIG.rsyncexclsrpm:
-        opts = opts + ' --exclude=\"*.src.rpm\" --exclude=\"/SRPMS/\"'
+        opts = opts + ' --exclude="*.src.rpm" --exclude="/SRPMS/"'
     if CONFIG.rsyncexcldebug:
-        opts = opts + ' --exclude=\"*-debuginfo-*.rpm\" --exclude=\"/debug/\"'
-    opts = opts + ' --include=\"*.rpm\"'
+        opts = opts + ' --exclude="*-debuginfo-*.rpm" --exclude="/debug/"'
+    opts = opts + ' --include="*.rpm"'
     if CONFIG.rsyncexclsrpm or CONFIG.rsyncexcldebug:
-        opts = opts + ' --exclude=\"*.*\"'
+        opts = opts + ' --exclude="*.*"'
 
-    ret = run('%s %s %s %s' % (CONFIG.cmd['rsync'], opts, url, path), dryrun=True)
+    ret = run("{} {} {} {}".format(CONFIG.cmd["rsync"], opts, url, path), dryrun=True)
     if ret:
-        raise MrepoMirrorException('Failed with return code: %s' % ret)
+        raise MrepoMirrorException(f"Failed with return code: {ret}")
 
 
 def mirrorlftp(url, path, dist):
     "Mirror everything from a http://, ftp://, sftp://, fish:// URL"
-    if not CONFIG.cmd['lftp']:
-        error(1, 'lftp was not found. fish, ftp, http and sftp support (using lftp) is therefore disabled.')
+    if not CONFIG.cmd["lftp"]:
+        error(
+            1,
+            "lftp was not found. fish, ftp, http and sftp support (using lftp) is therefore disabled.",
+        )
         return
     mkdir(path)
 
-    cmds = CONFIG.lftpcommands + ';'
+    cmds = CONFIG.lftpcommands + ";"
 
     if dist.sslcert:
-        cmds = cmds + ' set ssl:cert-file ' + dist.sslcert + ';'
+        cmds = cmds + " set ssl:cert-file " + dist.sslcert + ";"
     if dist.sslkey:
-        cmds = cmds + ' set ssl:key-file ' + dist.sslkey + ';'
+        cmds = cmds + " set ssl:key-file " + dist.sslkey + ";"
     if dist.sslca:
-        cmds = cmds + ' set ssl:ca-file ' + dist.sslca + ' ;'
+        cmds = cmds + " set ssl:ca-file " + dist.sslca + " ;"
 
     if CONFIG.lftptimeout:
-        cmds = cmds + ' set net:timeout %s;' % CONFIG.lftptimeout
+        cmds = cmds + f" set net:timeout {CONFIG.lftptimeout};"
     if CONFIG.lftpbwlimit:
-        cmds = cmds + ' set net:limit-total-rate %s:0;' % CONFIG.lftpbwlimit
+        cmds = cmds + f" set net:limit-total-rate {CONFIG.lftpbwlimit}:0;"
 
     opts = CONFIG.lftpoptions
     if OPTIONS.verbose >= 6:
-        opts = opts + ' -d'
+        opts = opts + " -d"
 
     mirroropts = CONFIG.lftpmirroroptions
     if OPTIONS.verbose >= 3:
-        mirroropts = mirroropts + ' -v' * (OPTIONS.verbose - 2)
+        mirroropts = mirroropts + " -v" * (OPTIONS.verbose - 2)
     if OPTIONS.dryrun:
-        mirroropts = mirroropts + ' --dry-run'
+        mirroropts = mirroropts + " --dry-run"
     if CONFIG.lftpcleanup:
-        mirroropts = mirroropts + ' -e'
-    mirroropts = mirroropts + ' -I *.rpm -X \"/headers/\" -X \"/repodata/\"'
+        mirroropts = mirroropts + " -e"
+    mirroropts = mirroropts + ' -I *.rpm -X "/headers/" -X "/repodata/"'
     if CONFIG.lftpexclsrpm:
-        mirroropts = mirroropts + ' -X \"*.src.rpm\" -X \"/SRPMS/\"'
+        mirroropts = mirroropts + ' -X "*.src.rpm" -X "/SRPMS/"'
     if CONFIG.lftpexcldebug:
-        mirroropts = mirroropts + ' -X \"*-debuginfo-*.rpm\" -X \"/debug/\"'
+        mirroropts = mirroropts + ' -X "*-debuginfo-*.rpm" -X "/debug/"'
 
-    ret = run('%s %s -c \'%s mirror %s %s %s\'' % (CONFIG.cmd['lftp'], opts, cmds, mirroropts, url, path), dryrun=True)
+    ret = run(
+        "{} {} -c '{} mirror {} {} {}'".format(
+            CONFIG.cmd["lftp"], opts, cmds, mirroropts, url, path
+        ),
+        dryrun=True,
+    )
     if ret:
-        raise MrepoMirrorException('Failed with return code: %s' % ret)
+        raise MrepoMirrorException(f"Failed with return code: {ret}")
 
 
 def mirrorreposync(url, path, reponame, dist):
     "Mirror everything from a reposync:// URL"
-    if not CONFIG.cmd['reposync']:
-        error(1, 'reposync was not found. reposync support is therefore disabled.')
+    if not CONFIG.cmd["reposync"]:
+        error(1, "reposync was not found. reposync support is therefore disabled.")
         return
     mkdir(path)
 
-    url = url.replace('reposyncs://', 'https://')
-    url = url.replace('reposync://', 'http://')
-    url = url.replace('reposyncf://', 'ftp://')
+    url = url.replace("reposyncs://", "https://")
+    url = url.replace("reposync://", "http://")
+    url = url.replace("reposyncf://", "ftp://")
 
     opts = CONFIG.reposyncoptions
     if OPTIONS.verbose < 3:
-        opts = opts + ' -q'
+        opts = opts + " -q"
     if OPTIONS.dryrun:
-        opts = opts + ' --urls'
+        opts = opts + " --urls"
     if CONFIG.reposynccleanup:
-        opts = opts + ' --delete'
+        opts = opts + " --delete"
     if CONFIG.reposyncnewestonly:
-        opts = opts + ' --newest-only'
+        opts = opts + " --newest-only"
     if CONFIG.reposyncnorepopath:
-        opts = opts + ' --norepopath'
+        opts = opts + " --norepopath"
 
     # store a temporary YUM config to use with reposync
-    reposync_conf_contents = "[%s]\n" % reponame
-    reposync_conf_contents += "name=%s\n" % reponame
-    reposync_conf_contents += "baseurl=%s\n" % url
+    reposync_conf_contents = f"[{reponame}]\n"
+    reposync_conf_contents += f"name={reponame}\n"
+    reposync_conf_contents += f"baseurl={url}\n"
     reposync_conf_contents += "enabled=1\n"
     if dist.sslca:
-        reposync_conf_contents += "sslcacert=%s\n" % dist.sslca
+        reposync_conf_contents += f"sslcacert={dist.sslca}\n"
     if dist.sslcert:
-        reposync_conf_contents += "sslclientcert=%s\n" % dist.sslcert
+        reposync_conf_contents += f"sslclientcert={dist.sslcert}\n"
     if dist.sslkey:
-        reposync_conf_contents += "sslclientkey=%s\n" % dist.sslkey
+        reposync_conf_contents += f"sslclientkey={dist.sslkey}\n"
     if CONFIG.reposynctimeout:
-        reposync_conf_contents += "timeout=%s\n" % CONFIG.reposynctimeout
+        reposync_conf_contents += f"timeout={CONFIG.reposynctimeout}\n"
     if CONFIG.reposyncminrate:
-        reposync_conf_contents += "minrate=%s\n" % CONFIG.reposyncminrate
-
+        reposync_conf_contents += f"minrate={CONFIG.reposyncminrate}\n"
 
     (file_object, reposync_conf_file) = tempfile.mkstemp(text=True)
-    handle = os.fdopen(file_object, 'w')
+    handle = os.fdopen(file_object, "w")
     handle.writelines(reposync_conf_contents)
     handle.close()
 
-    ret = run("%s %s --config '%s' --repoid %s --download-path '%s'" % (
-        CONFIG.cmd['reposync'],
-        opts,
-        reposync_conf_file,
-        reponame,
-        path,
-    ))
+    ret = run(
+        "{} {} --config '{}' --repoid {} --download-path '{}'".format(
+            CONFIG.cmd["reposync"],
+            opts,
+            reposync_conf_file,
+            reponame,
+            path,
+        )
+    )
 
     # remove the temporary config
     os.remove(reposync_conf_file)
 
     if ret:
-        raise MrepoMirrorException('Failed with return code: %s' % ret)
+        raise MrepoMirrorException(f"Failed with return code: {ret}")
 
 
 def which(cmd):
     "Find executables in PATH environment"
-    for path in os.environ.get('PATH', '$PATH').split(':'):
+    for path in os.environ.get("PATH", "$PATH").split(":"):
         if os.path.isfile(path_join(path, cmd)):
-            info(5, 'Found command %s in path %s' % (cmd, path))
+            info(5, f"Found command {cmd} in path {path}")
             return path_join(path, cmd)
-    return ''
+    return ""
 
 
 def mail(subject, msg):
     if not CONFIG.mailto:
-        info(2, 'mailto not configured, not sending mail')
+        info(2, "mailto not configured, not sending mail")
         return
-    info(2, 'Sending mail to: %s' % CONFIG.mailto)
+    info(2, f"Sending mail to: {CONFIG.mailto}")
     try:
         smtp = smtplib.SMTP(CONFIG.smtpserver)
-        msg = 'Subject: [mrepo] %s\nX-Mailer: mrepo %s\n\n%s' % (subject, VERSION, msg)
+        msg = f"Subject: [mrepo] {subject}\nX-Mailer: mrepo {VERSION}\n\n{msg}"
         for email in CONFIG.mailto.split():
-            smtp.sendmail(CONFIG.mailfrom, email, 'To: %s\n%s' % (email, msg))
+            smtp.sendmail(CONFIG.mailfrom, email, f"To: {email}\n{msg}")
         smtp.quit()
-    except (smtplib.SMTPException, socket.error):
-        info(1, 'Sending mail via %s failed.' % CONFIG.smtpserver)
+    except (OSError, smtplib.SMTPException):
+        info(1, f"Sending mail via {CONFIG.smtpserver} failed.")
 
 
 def readconfig():
     config = Config()
     if config.confdir and path_is_dir(config.confdir):
-        files = glob.glob(path_join(config.confdir, '*.conf'))
+        files = glob.glob(path_join(config.confdir, "*.conf"))
         files.sort()
         for configfile in files:
             config.read(configfile)
@@ -1044,7 +1157,16 @@ def _next_none(iterator):
         return None
 
 
-def synciter(a, b, key=lambda x: x, keya=None, keyb=None):
+T = TypeVar("T")
+
+
+def synciter[T](
+    a: Iterable[T],
+    b: Iterable[T],
+    key: Callable[[T], Any] = lambda x: x,
+    keya: Callable[[T], Any] | None = None,
+    keyb: Callable[[T], Any] | None = None,
+) -> Generator[tuple[T, None] | tuple[None, T] | tuple[T, T], None, None]:
     """returns an iterator that compares two ordered iterables a and b.
     If keya or keyb are specified, they are called with elements of the corresponding
     iterable. They should return a value that is used to compare two elements.
@@ -1086,17 +1208,17 @@ def synciter(a, b, key=lambda x: x, keya=None, keyb=None):
         belem = _next_none(b)
 
 
-def listrpms(directories, relative=''):
+def listrpms(directories, relative=""):
     """return a list of rpms in the given directories as a list of (name, path) tuples
     if relative is specified, return the paths relative to this directory"""
     if not isinstance(directories, (list, tuple)):
         directories = (directories,)
-    if relative and not relative.endswith('/'):
-        relative += '/'
+    if relative and not relative.endswith("/"):
+        relative += "/"
 
     rpms = []
     for directory in directories:
-        for filename in glob.glob(path_join(directory, '**/*.rpm'), recursive=True):
+        for filename in glob.glob(path_join(directory, "**/*.rpm"), recursive=True):
             final_path = os.path.dirname(filename)
             if relative:
                 final_path = relpath(final_path, relative)
@@ -1113,38 +1235,41 @@ def listrpmlinks(directory):
     links = []
     for filename in os.listdir(directory):
         path = path_join(directory, filename)
-        if islink(path) and filename.endswith('.rpm'):
+        if islink(path) and filename.endswith(".rpm"):
             links.append((filename, readlink(path)))
     return links
 
 
 def main():
     ### Check availability of commands
-    for cmd in CONFIG.cmd: # pylint: disable=consider-using-dict-items
+    for cmd in CONFIG.cmd:  # pylint: disable=consider-using-dict-items
         if not CONFIG.cmd[cmd]:
             continue
         cmdlist = CONFIG.cmd[cmd].split()
         if not os.path.isfile(cmdlist[0]):
             cmdlist[0] = which(cmdlist[0])
         if cmdlist[0] and not os.path.isfile(cmdlist[0]):
-            error(4, '%s command not found as %s, support disabled' % (cmd, cmdlist[0]))
-            CONFIG.cmd[cmd] = ''
+            error(4, f"{cmd} command not found as {cmdlist[0]}, support disabled")
+            CONFIG.cmd[cmd] = ""
         else:
-            CONFIG.cmd[cmd] = ' '.join(cmdlist)
-    if not CONFIG.cmd['createrepo']:
-        error(1, 'No tools found to generate repository metadata. Please install createrepo.')
+            CONFIG.cmd[cmd] = " ".join(cmdlist)
+    if not CONFIG.cmd["createrepo"]:
+        error(
+            1,
+            "No tools found to generate repository metadata. Please install createrepo.",
+        )
 
     ### Set proxy-related environment variables
     if CONFIG.no_proxy:
-        os.environ['no_proxy'] = CONFIG.no_proxy
+        os.environ["no_proxy"] = CONFIG.no_proxy
     if CONFIG.ftp_proxy:
-        os.environ['ftp_proxy'] = CONFIG.ftp_proxy
+        os.environ["ftp_proxy"] = CONFIG.ftp_proxy
     if CONFIG.http_proxy:
-        os.environ['http_proxy'] = CONFIG.http_proxy
+        os.environ["http_proxy"] = CONFIG.http_proxy
     if CONFIG.https_proxy:
-        os.environ['https_proxy'] = CONFIG.https_proxy
+        os.environ["https_proxy"] = CONFIG.https_proxy
     if CONFIG.rsync_proxy:
-        os.environ['RSYNC_PROXY'] = CONFIG.rsync_proxy
+        os.environ["RSYNC_PROXY"] = CONFIG.rsync_proxy
 
     ### Select list of distributions in order of appearance
     if not OPTIONS.dists:
@@ -1158,47 +1283,46 @@ def main():
                     dists.append(dist)
                     append = True
             if not append:
-                error(1, 'Distribution %s not defined' % name)
+                error(1, f"Distribution {name} not defined")
 
     sumnew = 0
     sumremoved = 0
-    msg = 'The following changes to mrepo\'s repositories on %s have been made:' % os.uname()[1]
+    msg = f"The following changes to mrepo's repositories on {os.uname()[1]} have been made:"
 
     ### Mounting and mirroring available distributions/repositories
     for dist in dists:
         if OPTIONS.update:
-            msg = msg + '\n\nDist: %s (%s)' % (dist.name, dist.nick)
-            info(1, '%s: Updating %s' % (dist.nick, dist.name))
+            msg = msg + f"\n\nDist: {dist.name} ({dist.nick})"
+            info(1, f"{dist.nick}: Updating {dist.name}")
 
             distnew = 0
             distremoved = 0
 
             ### Downloading things
             for repo in dist.listrepos(OPTIONS.repos):
-                if not repo.lock('update'):
+                if not repo.lock("update"):
                     continue
                 if repo in dist.listrepos():
                     repo.mirror()
                 else:
-                    info(2, '%s: Repository %s does not exist' % (dist.nick, repo.name))
-                    repo.unlock('update')
+                    info(2, f"{dist.nick}: Repository {repo.name} does not exist")
+                    repo.unlock("update")
                     continue
 
-                repo.unlock('update')
+                repo.unlock("update")
 
                 ### files whose size has changed are in new and removed!
                 new = repo.newlist.difference(repo.oldlist)
                 removed = repo.oldlist.difference(repo.newlist)
 
                 if new or removed:
-                    msg = msg + '\n\n\tRepo: %s' % repo.name
-                    info(2, '%s: Repository %s changed (new: %d, removed: %d)' % (
-                        dist.nick,
-                        repo.name,
-                        len(new),
-                        len(removed),
-                    ))
-                    file_object = open(CONFIG.logfile, 'a+', encoding='utf-8')
+                    msg = msg + f"\n\n\tRepo: {repo.name}"
+                    info(
+                        2,
+                        f"{dist.nick}: Repository {repo.name} changed (new: {len(new)}, removed: {len(removed)})",
+                    )
+
+                    file_object = open(CONFIG.logfile, "a+", encoding="utf-8")
                     date = time.strftime("%b %d %H:%M:%S", time.gmtime())
 
                     def sortedlist(pkgs):
@@ -1207,68 +1331,73 @@ def main():
                         return result
 
                     def formatlist(pkglist):
-                        return '\n\t' + '\n\t'.join([elem[0] for elem in pkglist])
+                        return "\n\t" + "\n\t".join([elem[0] for elem in pkglist])
 
                     if new:
                         pkglist = sortedlist(new)
-                        info(4, '%s: New packages: %s' % (dist.nick, formatlist(pkglist)))
+                        info(4, f"{dist.nick}: New packages: {formatlist(pkglist)}")
                         distnew += len(pkglist)
                         for element in pkglist:
-                            file_object.write('%s %s/%s Added %s (%d kiB)\n' % (
-                                date,
-                                dist.nick,
-                                repo.name,
-                                element[0],
-                                element[1] / 1024,
-                            ))
-                            msg = msg + '\n\t\t+ %s (%d kiB)' % (element[0], element[1] / 1024)
+                            file_object.write(
+                                f"{date} {dist.nick}/{repo.name} Added {element[0]} ({element[1] / 1024:.1f} kiB)\n"
+                            )
+
+                            msg = (
+                                msg
+                                + f"\n\t\t+ {element[0]} ({element[1] / 1024:.1f} kiB)"
+                            )
 
                     if removed:
                         pkglist = sortedlist(removed)
-                        info(4, '%s: Removed packages: %s' % (dist.nick, formatlist(pkglist)))
+                        info(
+                            4,
+                            f"{dist.nick}: Removed packages: {formatlist(pkglist)}",
+                        )
                         distremoved += len(pkglist)
                         for element in pkglist:
-                            file_object.write('%s %s/%s Removed %s (%d kiB)\n' % (
-                                date,
-                                dist.nick,
-                                repo.name,
-                                element[0],
-                                element[1] / 1024,
-                            ))
-                            msg = msg + '\n\t\t- %s (%d kiB)' % (element[0], element[1] / 1024)
+                            file_object.write(
+                                f"{date} {dist.nick}/{repo.name} Removed {element[0]} ({element[1] / 1024:.1f} kiB)\n"
+                            )
+
+                            msg = (
+                                msg
+                                + f"\n\t\t- {element[0]} ({element[1] / 1024:.1f} kiB)"
+                            )
 
                     file_object.close()
                     repo.changed = True
 
             if distnew or distremoved:
-                msg = msg + '\n'
-                info(1, '%s: Distribution updated (new: %d, removed: %d)' % (dist.nick, distnew, distremoved))
+                msg = msg + "\n"
+                info(
+                    1,
+                    f"{dist.nick}: Distribution updated (new: {distnew}, removed: {distremoved})",
+                )
                 sumnew = sumnew + distnew
                 sumremoved = sumremoved + distremoved
 
     if sumnew or sumremoved:
-        subject = 'changes to %s (new: %d, removed: %d)' % (os.uname()[1], sumnew, sumremoved)
+        subject = f"changes to {os.uname()[1]} (new: {sumnew}, removed: {sumremoved})"
         mail(subject, msg)
 
     if not OPTIONS.generate:
         sys.exit(0)
 
-
     ### Generating metadata for available distributions/repositories
     for dist in dists:
-        info(1, '%s: Generating %s meta-data' % (dist.nick, dist.name))
+        info(1, f"{dist.nick}: Generating {dist.name} meta-data")
 
         dist.genmetadata()
 
 
 ### Main entrance
-if __name__ == '__main__':
+if __name__ == "__main__":
     OPTIONS = Options(sys.argv[1:])
     CONFIG = readconfig()
     try:
         main()
     except KeyboardInterrupt:
-        die(6, 'Exiting on user request')
+        die(6, "Exiting on user request")
     sys.exit(EXITCODE)
 
 # vim:ts=4:sw=4:et
